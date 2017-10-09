@@ -21,6 +21,14 @@ class SchemaObjectResolver {
         this.actual = actual;
     }
 
+    Swagger getActual() {
+        return actual;
+    }
+
+    Swagger getExpected() {
+        return expected;
+    }
+
     List<String> getExpectedConsumes(Operation op) {
         return getListWithFallback(op.getConsumes(), expected.getConsumes());
     }

@@ -2,13 +2,12 @@ package io.github.robwin.swagger.test;
 
 import io.swagger.models.*;
 import io.swagger.models.parameters.*;
-import io.swagger.models.properties.ArrayProperty;
-import io.swagger.models.properties.Property;
-import io.swagger.models.properties.RefProperty;
-import io.swagger.models.properties.StringProperty;
+import io.swagger.models.properties.*;
+import io.swagger.models.refs.RefFormat;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.assertj.core.api.SoftAssertionError;
 import org.assertj.core.api.SoftAssertions;
 
 import java.util.*;
@@ -23,6 +22,7 @@ class ConsumerDrivenValidator implements ContractValidator {
     private SwaggerAssertionConfig assertionConfig;
     private Swagger actual;
     private SchemaObjectResolver schemaObjectResolver;   // provide means to fall back from local to global properties
+    private Set<String> resolvedDefinitions;
 
     ConsumerDrivenValidator(Swagger actual, SwaggerAssertionConfig assertionConfig) {
         this.actual = actual;
@@ -33,6 +33,7 @@ class ConsumerDrivenValidator implements ContractValidator {
     @Override
     public void validateSwagger(Swagger expected, SchemaObjectResolver schemaObjectResolver) {
         this.schemaObjectResolver = schemaObjectResolver;
+        this.resolvedDefinitions = new HashSet<>();
 
         validateInfo(actual.getInfo(), expected.getInfo());
 
@@ -114,6 +115,9 @@ class ConsumerDrivenValidator implements ContractValidator {
 
     private void validateDefinition(String definitionName, Model actualDefinition, Model expectedDefinition) {
         if (expectedDefinition != null && actualDefinition != null) {
+            if (resolvedDefinitions.contains(definitionName)) return;
+            resolvedDefinitions.add(definitionName);
+
             validateModel(actualDefinition, expectedDefinition, String.format("Checking model of definition '%s", definitionName));
             validateDefinitionProperties(schemaObjectResolver.resolvePropertiesFromActual(actualDefinition),
                                          schemaObjectResolver.resolvePropertiesFromExpected(expectedDefinition),
@@ -181,15 +185,66 @@ class ConsumerDrivenValidator implements ContractValidator {
         if (expectedProperty != null && isAssertionEnabled(SwaggerAssertionType.PROPERTIES)) {
             if (expectedProperty instanceof RefProperty) {
                 if (isAssertionEnabled(SwaggerAssertionType.REF_PROPERTIES)) {
-                    RefProperty refProperty = (RefProperty) expectedProperty;
+                    RefProperty expectedRefProperty = (RefProperty) expectedProperty;
                     softAssertions.assertThat(actualProperty).as(message).isExactlyInstanceOf(RefProperty.class);
-                    // TODO Validate RefProperty
+                    RefProperty actualRefProperty = (RefProperty) actualProperty;
+
+                    if (expectedRefProperty.getRefFormat() == RefFormat.INTERNAL && actualRefProperty.getRefFormat() == RefFormat.INTERNAL) {
+                        String defName = expectedRefProperty.getSimpleRef().equals(actualRefProperty.getSimpleRef()) ? expectedRefProperty.getSimpleRef()
+                                : expectedRefProperty.getSimpleRef() + " <: " + actualRefProperty.getSimpleRef();
+
+                        Model expectedModel = schemaObjectResolver.getExpected().getDefinitions().get(expectedRefProperty.getSimpleRef());
+                        softAssertions.assertThat(expectedModel).as("Model exists for %s", expectedRefProperty.getSimpleRef()).isNotNull();
+                        Model actualModel = schemaObjectResolver.getActual().getDefinitions().get(actualRefProperty.getSimpleRef());
+                        softAssertions.assertThat(actualModel).as("Model exists for %s", actualRefProperty.getSimpleRef()).isNotNull();
+
+                        validateDefinition(defName, actualModel, expectedModel);
+                    }
+                }
+            } else if (expectedProperty instanceof ObjectProperty) {
+                ObjectProperty expectedObjectProperty = (ObjectProperty)expectedProperty;
+                softAssertions.assertThat(actualProperty).as(message).isExactlyInstanceOf(ObjectProperty.class);
+                ObjectProperty actualObjectProperty = (ObjectProperty)actualProperty;
+
+                // check required
+                List<String> expectedRequiredProperties = expectedObjectProperty.getRequiredProperties();
+                List<String> actualRequiredProperties = actualObjectProperty.getRequiredProperties();
+
+                if(CollectionUtils.isNotEmpty(expectedRequiredProperties)) {
+                    softAssertions.assertThat(actualRequiredProperties).as(message + " object definition required properties").isNotEmpty();
+                    if(CollectionUtils.isNotEmpty(actualRequiredProperties)) {
+                        softAssertions.assertThat(actualRequiredProperties).as(message + " object definition required properties").hasSameElementsAs(expectedRequiredProperties);
+                    }
+                } else {
+                    softAssertions.assertThat(actualRequiredProperties).as(message + " object definition required properties").isNullOrEmpty();
+                }
+
+                // check sub properties
+                Map<String, Property> expectedSubProperties = expectedObjectProperty.getProperties();
+                Map<String, Property> actualSubProperties = actualObjectProperty.getProperties();
+
+                if(MapUtils.isNotEmpty(expectedSubProperties)) {
+                    softAssertions.assertThat(actualSubProperties).as(message + " object definition").isNotEmpty();
+                    if(MapUtils.isNotEmpty(actualSubProperties)) {
+                        softAssertions.assertThat(actualSubProperties.keySet()).as(message + " object definition").containsAll(expectedSubProperties.keySet());
+                        for (Map.Entry<String, Property> expectedDefinitionPropertyEntry : expectedSubProperties.entrySet()) {
+                            Property expectedDefinitionProperty = expectedDefinitionPropertyEntry.getValue();
+                            Property actualDefinitionProperty = actualSubProperties.get(expectedDefinitionPropertyEntry.getKey());
+                            String propertyName = expectedDefinitionPropertyEntry.getKey();
+
+                            validateProperty(actualDefinitionProperty, expectedDefinitionProperty, message + " object definition property " + propertyName);
+                        }
+                    }
+                } else {
+                    softAssertions.assertThat(actualSubProperties).as(message).isNullOrEmpty();
                 }
             } else if (expectedProperty instanceof ArrayProperty) {
                 if (isAssertionEnabled(SwaggerAssertionType.ARRAY_PROPERTIES)) {
                     ArrayProperty arrayProperty = (ArrayProperty) expectedProperty;
                     softAssertions.assertThat(actualProperty).as(message).isExactlyInstanceOf(ArrayProperty.class);
-                    // TODO Validate ArrayProperty
+
+                    ArrayProperty actualArrayProperty = (ArrayProperty) actualProperty;
+                    validateProperty(actualArrayProperty.getItems(), arrayProperty.getItems(), message + " array definition");
                 }
             } else if (expectedProperty instanceof StringProperty) {
                 if (isAssertionEnabled(SwaggerAssertionType.STRING_PROPERTIES)) {
@@ -208,7 +263,7 @@ class ConsumerDrivenValidator implements ContractValidator {
                 }
             } else {
                 // TODO Validate all other properties
-                softAssertions.assertThat(actualProperty).isExactlyInstanceOf(expectedProperty.getClass());
+                softAssertions.assertThat(actualProperty).as(message).isExactlyInstanceOf(expectedProperty.getClass());
             }
         }
 
