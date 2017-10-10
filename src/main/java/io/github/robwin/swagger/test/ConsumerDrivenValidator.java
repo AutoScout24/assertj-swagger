@@ -259,6 +259,7 @@ class ConsumerDrivenValidator implements ContractValidator {
                         }else{
                             softAssertions.assertThat(actualStringProperty.getEnum()).isNullOrEmpty();
                         }
+                        softAssertions.assertThat(actualStringProperty.getFormat()).isEqualTo(expectedStringProperty.getFormat());
                     }
                 }
             } else {
