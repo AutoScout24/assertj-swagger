@@ -1,4 +1,15 @@
-= assertj-swagger
+= assertj-swagger (fork)
+
+Fork of the library assertj-swagger with the following enhancements for consumer driven contract tests (i.e. validations using satisfiesContract):
+
+* Resolution of local references and recursive validation field by field
+* Resolution of object types and recursive validation
+* Validation of array types
+* Validation of string formats
+
+Owning team is Gecloud.
+
+= assertj-swagger (origin)
 :author: Robert Winkler
 :version: 0.6.0
 :hardbreaks:
