@@ -1,0 +1,108 @@
+buildscript {
+    repositories {
+        jcenter()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'org.kt3k.gradle.plugin:coveralls-gradle-plugin:2.0.1'
+        classpath "org.jfrog.buildinfo:build-info-extractor-gradle:4.4.18"
+    }
+}
+description = 'A Swagger assertion library'
+version = '0.7.0-SNAPSHOT'
+group = 'com.autoscout24'
+
+apply plugin: 'java'
+apply plugin: 'maven-publish'
+
+tasks.withType(JavaCompile) {
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.deprecation = true
+    options.encoding = 'UTF-8'
+    options.compilerArgs << "-Xlint:unchecked"
+}
+
+repositories {
+    jcenter()
+    mavenCentral()
+    mavenLocal()
+}
+
+dependencies {
+    compile "io.swagger:swagger-compat-spec-parser:1.0.32"
+    compile "commons-collections:commons-collections:3.2.1"
+    compile "org.slf4j:slf4j-api:1.7.12"
+    compile "org.assertj:assertj-core:3.8.0"
+    testCompile "junit:junit:4.11"
+    testCompile "ch.qos.logback:logback-classic:1.1.2"
+}
+
+task sourcesJar(type: Jar, dependsOn: classes) {
+    classifier = 'sources'
+    from sourceSets.main.allSource
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    classifier = 'javadoc'
+    from javadoc.destinationDir
+}
+
+artifacts {
+    archives sourcesJar
+    archives javadocJar
+}
+
+task wrapper(type: Wrapper) {
+    gradleVersion = '3.5'
+}
+
+publishing {
+    repositories {
+        maven {
+            url 'https://nexus.tools.autoscout24.com/nexus/content/repositories/snapshots/'
+            credentials {
+                username 'deploy'
+                password System.getenv('GO_NEXUS_DEPLOYMENT_PASSWORD')
+            }
+        }
+    }
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            pom.withXml {
+                def devs = ['RobWin': 'Robert Winkler']
+                def root = asNode()
+
+                root.dependencies.'*'.findAll() {
+                    it.scope.text() == 'runtime' && project.configurations.compile.allDependencies.find { dep ->
+                        dep.name == it.artifactId.text()
+                    }
+                }.each() {
+                    it.scope*.value = 'compile'
+                }
+
+                root.appendNode('name', 'assertj-swagger')
+                root.appendNode('packaging', 'jar')
+                root.appendNode('url', 'https://github.com/RobWin/assertj-swagger')
+                root.appendNode('description', 'A Swagger to Markup (AsciiDoc and Markdown) converter.')
+
+                def license = root.appendNode('licenses').appendNode('license')
+                license.appendNode('name', 'Apache-2.0')
+                license.appendNode('url', 'https://github.com/RobWin/assertj-swagger/blob/master/LICENSE.txt')
+                license.appendNode('distribution', 'repo')
+
+                root.appendNode('scm').appendNode('url', 'https://github.com/RobWin/assertj-swagger.git')
+
+                def developers = root.appendNode('developers')
+                devs.each {
+                    def d = developers.appendNode('developer')
+                    d.appendNode('id', it.key)
+                    d.appendNode('name', it.value)
+                }
+            }
+            artifact sourcesJar
+            artifact javadocJar
+        }
+    }
+}
